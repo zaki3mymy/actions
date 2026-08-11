@@ -74,6 +74,8 @@ jobs:
 
             ${{ steps.issue.outputs.body }}
 
+            バックグラウンドエージェントは使用せず、すべての作業を直接実行してください。
+
             ## 作業手順
 
             1. ブランチ `${{ steps.issue.outputs.branch }}` を作成して実装する（他のブランチ名は使わないこと）

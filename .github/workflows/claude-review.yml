@@ -28,6 +28,7 @@ jobs:
           claude_args: "--allowedTools Bash,Read,Glob,Grep"
           prompt: |
             PR #${{ github.event.issue.number }} をレビューしてください。
+            バックグラウンドエージェントは使用せず、すべての作業を直接実行してください。
 
             差分を確認し、以下の観点でレビューしてください：
             - 実装の正確さ（Issue の要件を満たしているか）

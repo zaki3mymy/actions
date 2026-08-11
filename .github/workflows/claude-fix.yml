@@ -59,6 +59,7 @@ jobs:
           claude_args: "--allowedTools Bash,Read,Write,Edit,Glob,Grep"
           prompt: |
             PR #${{ github.event.pull_request.number }} にレビューで指摘がありました。内容を修正してください。
+            バックグラウンドエージェントは使用せず、すべての作業を直接実行してください。
 
             ## レビューサマリ
 
