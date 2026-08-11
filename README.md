@@ -72,7 +72,7 @@ jobs:
   fix:
     if: |
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
-      github.event_name == 'pull_request_review_comment'
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.in_reply_to_id != '')
     uses: zaki3mymy/actions/.github/workflows/claude-fix.yml@main
     secrets: inherit
 ```
