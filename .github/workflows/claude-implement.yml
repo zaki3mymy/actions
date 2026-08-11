@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       issue_number:
-        description: 'Issue番号'
+        description: "Issue番号"
         required: true
         type: string
 
@@ -80,11 +80,23 @@ jobs:
 
             1. ブランチ `${{ steps.issue.outputs.branch }}` を作成して実装する（他のブランチ名は使わないこと）
             2. コミット・プッシュする
-            3. 以下のコマンドでPRを作成する：
+            3. 以下のコマンドでPRを作成する（`BODY` には実装の説明を記載すること）：
                ```bash
+               BODY=$(cat <<'EOF_BODY'
+               Closes #${{ steps.issue.outputs.number }}
+
+               ## 実装内容
+
+               （実装方針・設計上の決定とその理由を記載）
+
+               ## 実装中の発見
+
+               （想定外の挙動、既存コードの注意点、今後の課題など気づいたことがあれば記載）
+               EOF_BODY
+               )
                gh pr create \
                  --title "${{ steps.issue.outputs.title }}" \
-                 --body "Closes #${{ steps.issue.outputs.number }}" \
+                 --body "$BODY" \
                  --head "${{ steps.issue.outputs.branch }}"
                ```
             4. 以下のコマンドでレビュー依頼コメントを投稿する：
