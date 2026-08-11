@@ -85,8 +85,7 @@ jobs:
                gh pr create \
                  --title "${{ steps.issue.outputs.title }}" \
                  --body "Closes #${{ steps.issue.outputs.number }}" \
-                 --head "${{ steps.issue.outputs.branch }}" \
-                 --base main
+                 --head "${{ steps.issue.outputs.branch }}"
                ```
             4. 以下のコマンドでレビュー依頼コメントを投稿する：
                ```bash
