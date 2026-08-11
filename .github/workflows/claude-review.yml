@@ -25,7 +25,7 @@ jobs:
           allowed_bots: "claudeapp-zaki3mymy"
           show_full_output: "true"
           trigger_phrase: "@claude review"
-          claude_args: "--allowedTools Bash,Read,Glob,Grep --no-background-workers"
+          claude_args: "--allowedTools Bash,Read,Glob,Grep"
           prompt: |
             PR #${{ github.event.issue.number }} をレビューしてください。
 
