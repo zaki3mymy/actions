@@ -6,7 +6,7 @@ on:
       issue_number:
         description: 'Issue番号'
         required: true
-        type: number
+        type: string
 
 jobs:
   implement:
