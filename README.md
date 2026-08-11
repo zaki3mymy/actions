@@ -33,6 +33,10 @@ on:
 
 jobs:
   implement:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     uses: zaki3mymy/actions/.github/workflows/claude-implement.yml@main
     with:
       issue_number: ${{ inputs.issue_number }}
@@ -53,6 +57,10 @@ jobs:
     if: |
       github.event.issue.pull_request != null &&
       contains(github.event.comment.body, '@claude review')
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     uses: zaki3mymy/actions/.github/workflows/claude-review.yml@main
     secrets: inherit
 ```
@@ -73,6 +81,10 @@ jobs:
     if: |
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
       (github.event_name == 'pull_request_review_comment' && github.event.comment.in_reply_to_id != '' && !contains(github.event.comment.user.login, 'claudeapp-zaki3mymy'))
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     uses: zaki3mymy/actions/.github/workflows/claude-fix.yml@main
     secrets: inherit
 ```
