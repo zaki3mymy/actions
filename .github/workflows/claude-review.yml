@@ -30,17 +30,77 @@ jobs:
             PR #${{ github.event.issue.number }} をレビューしてください。
             バックグラウンドエージェントは使用せず、すべての作業を直接実行してください。
 
+            ## 事前確認：未解決スレッドの有無
+
+            まず以下のコマンドで未解決レビュースレッドを取得してください：
+
+            ```bash
+            gh api graphql -f query='
+            query {
+              repository(owner: "${{ github.repository_owner }}", name: "${{ github.event.repository.name }}") {
+                pullRequest(number: ${{ github.event.issue.number }}) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      id
+                      isResolved
+                      comments(first: 1) {
+                        nodes {
+                          body
+                          path
+                          line
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }'
+            ```
+
+            ---
+
+            ### 未解決スレッドがある場合（再レビュー）
+
+            各スレッドについて、最新の差分でその指摘が対応済みかを確認してください。
+
+            **すべての指摘が対応済みの場合：**
+
+            1. 未解決スレッドをすべて resolve する：
+               ```bash
+               gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_ID"}) { thread { id isResolved } } }'
+               ```
+            2. PR を approve する：
+               ```bash
+               gh pr review ${{ github.event.issue.number }} --approve \
+                 --body "指摘事項がすべて対応されていることを確認しました。LGTM"
+               ```
+
+            **未対応の指摘が残っている場合：**
+
+            対応済みスレッドは resolve した上で、残存する問題点を再度 REQUEST_CHANGES でコメントしてください：
+            ```bash
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}/reviews \
+              --method POST \
+              --field body="## レビューサマリ\n\n..." \
+              --field event="REQUEST_CHANGES" \
+              --field "comments[][path]=対象ファイルパス" \
+              --field "comments[][line]=行番号" \
+              --field "comments[][body]=指摘内容"
+            ```
+
+            ---
+
+            ### 未解決スレッドがない場合（初回レビュー）
+
             差分を確認し、以下の観点でレビューしてください：
             - 実装の正確さ（Issue の要件を満たしているか）
             - コードの品質・可読性
             - 潜在的なバグやエッジケース
 
-            ## コメントの残し方
-
             問題を発見した場合は `gh api` を使って行コメントとサマリの両方を含むレビューをサブミットしてください：
 
             ```bash
-            gh api repos/OWNER/REPO/pulls/PR_NUMBER/reviews \
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}/reviews \
               --method POST \
               --field body="## レビューサマリ\n\n全体的な所見" \
               --field event="REQUEST_CHANGES" \
