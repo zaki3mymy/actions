@@ -13,6 +13,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Claude global config
+        run: |
+          mkdir -p ~/.claude
+          curl -fsSL https://raw.githubusercontent.com/zaki3mymy/dotfiles/main/home/dot_claude/CLAUDE.md \
+            -o ~/.claude/CLAUDE.md || true
+
       - uses: actions/create-github-app-token@v2
         id: app-token
         with:
