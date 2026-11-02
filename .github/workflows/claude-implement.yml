@@ -16,7 +16,7 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Claude global config
         run: |
@@ -24,9 +24,9 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/zaki3mymy/dotfiles/main/home/dot_claude/CLAUDE.md \
             -o ~/.claude/CLAUDE.md || true
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
 
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
@@ -68,11 +68,10 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           claude_args: "--allowedTools Bash,Read,Write,Edit,Glob,Grep"
-          show_full_output: "true"
           prompt: |
             以下のGitHub Issueを実装してください。
 

@@ -18,6 +18,8 @@ Claude Code を使った Issue ドリブン開発を自動化するワークフ�
 
 各リポジトリに薄いラッパーワークフローを置いて呼び出す。
 
+`claude-review.yml` と `claude-fix.yml` は、リポジトリの関係者（`author_association` が `OWNER` / `MEMBER` / `COLLABORATOR`）と、連携する Claude のボットからのコメント・レビューのときだけ起動する。この制限は呼び出し先のワークフロー側で行うので、ラッパー側で指定する必要はない。
+
 ```yaml
 # .github/workflows/claude-implement.yml
 name: Implement Issue

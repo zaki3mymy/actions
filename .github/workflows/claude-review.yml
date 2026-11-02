@@ -5,13 +5,20 @@ on:
 
 jobs:
   review:
+    # 公開リポジトリでは誰でもコメントできるため、リポジトリの関係者
+    # （OWNER/MEMBER/COLLABORATOR）と実装用ボット（claudeapp-zaki3mymy[bot]）の
+    # コメントでのみ起動する。ボットの author_association は NONE になるため、
+    # ログイン名で個別に許可している。
+    if: |
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) ||
+      github.event.comment.user.login == 'claudeapp-zaki3mymy[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Claude global config
         run: |
@@ -19,17 +26,16 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/zaki3mymy/dotfiles/main/home/dot_claude/CLAUDE.md \
             -o ~/.claude/CLAUDE.md || true
 
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEW_APP_PRIVATE_KEY }}
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           allowed_bots: "claudeapp-zaki3mymy"
-          show_full_output: "true"
           trigger_phrase: "@claude review"
           claude_args: "--allowedTools Bash,Read,Glob,Grep"
           prompt: |

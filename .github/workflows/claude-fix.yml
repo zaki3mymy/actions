@@ -5,13 +5,32 @@ on:
 
 jobs:
   fix:
+    # 公開リポジトリでは誰でもレビュー・コメントできるため、リポジトリの関係者
+    # （OWNER/MEMBER/COLLABORATOR）とレビュー用ボット（claudereview-zaki3mymy[bot]）の
+    # レビュー・コメントでのみ起動する。ボットの author_association は NONE になるため、
+    # ログイン名で個別に許可している。
+    if: |
+      (
+        github.event_name == 'pull_request_review' &&
+        (
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association) ||
+          github.event.review.user.login == 'claudereview-zaki3mymy[bot]'
+        )
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        (
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) ||
+          github.event.comment.user.login == 'claudereview-zaki3mymy[bot]'
+        )
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.ref }}
 
@@ -21,9 +40,9 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/zaki3mymy/dotfiles/main/home/dot_claude/CLAUDE.md \
             -o ~/.claude/CLAUDE.md || true
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
 
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
@@ -57,11 +76,10 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           allowed_bots: "claudereview-zaki3mymy"
-          show_full_output: "true"
           claude_args: "--allowedTools Bash,Read,Write,Edit,Glob,Grep"
           prompt: |
             PR #${{ github.event.pull_request.number }} にレビューで指摘がありました。内容を修正してください。
