@@ -1,0 +1,12 @@
+# Dependabot のバージョンアップデート（新しいバージョンが出たら更新 PR を作る）
+version: 2
+updates:
+  # 再利用ワークフローで使っている GitHub Actions
+  # （SHA で固定したアクションも、SHA とバージョンのコメントを更新する）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
