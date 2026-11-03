@@ -18,7 +18,7 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Claude global config
         run: |
@@ -26,13 +26,13 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/zaki3mymy/dotfiles/main/home/dot_claude/CLAUDE.md \
             -o ~/.claude/CLAUDE.md || true
 
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:
           app-id: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEW_APP_PRIVATE_KEY }}
 
-      - uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
+      - uses: anthropics/claude-code-action@4845bacbb38b3c4b15d948f035349786f678e068 # v1.0.267
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           allowed_bots: "claudeapp-zaki3mymy"
