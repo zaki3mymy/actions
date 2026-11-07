@@ -1,0 +1,80 @@
+name: PR Title
+
+# PR のタイトルが Conventional Commits の形かをチェックし、種類に応じてラベルを付ける。
+# ラベルは、リリースノートの見出し（.github/release.yml）と、次のバージョンの決定（next-tag.yml）に使う。
+#
+#   feat!: / fix!: など ! 付き → breaking（メジャーを上げる）
+#   feat:                    → feat（マイナーを上げる）
+#   fix:                     → fix
+#   release:                 → skip-release-notes（develop から main へのリリース PR。ノートに載せない）
+#
+# 呼び出し元は pull_request イベント（opened / edited / reopened / synchronize）で呼ぶ。
+# 呼び出し元のジョブには `permissions: pull-requests: write` が必要。
+on:
+  workflow_call:
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check title and sync labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # タイトルなどはスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          types="feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release"
+          pattern="^(${types})(\([^()]+\))?(!)?: .+"
+          if ! [[ "$TITLE" =~ $pattern ]]; then
+            echo "::error::PR title must follow Conventional Commits: <type>(<scope>)!: <description>"
+            echo "::error::type is one of: ${types//|/, }  (e.g. 'feat: 〇〇を追加', 'fix(cli): 〇〇を修正')"
+            echo "Title: $TITLE"
+            exit 1
+          fi
+          type="${BASH_REMATCH[1]}"
+          breaking="${BASH_REMATCH[3]}"
+          echo "Title is valid (type=$type${breaking:+, breaking})"
+
+          # Dependabot と fork の PR はトークンが読み取り専用なので、ラベルは付けない
+          # （Dependabot の PR には、Dependabot が dependencies のラベルを付ける）
+          if [[ "$PR_AUTHOR" == "dependabot[bot]" || "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]]; then
+            echo "Skipped labeling (Dependabot or fork PR)."
+            exit 0
+          fi
+
+          want=()
+          [[ -n "$breaking" ]] && want+=(breaking)
+          case "$type" in
+            feat) want+=(feat) ;;
+            fix) want+=(fix) ;;
+            release) want+=(skip-release-notes) ;;
+          esac
+
+          # このワークフローが管理するラベルだけを、タイトルに合わせて付け外しする
+          managed=(breaking feat fix skip-release-notes)
+          current=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          add=()
+          remove=()
+          for label in "${managed[@]}"; do
+            wanted=false
+            for w in "${want[@]}"; do [[ "$w" == "$label" ]] && wanted=true; done
+            has=false
+            grep -qxF "$label" <<< "$current" && has=true
+            if [[ "$wanted" == true && "$has" == false ]]; then add+=("$label"); fi
+            if [[ "$wanted" == false && "$has" == true ]]; then remove+=("$label"); fi
+          done
+
+          if [[ ${#add[@]} -eq 0 && ${#remove[@]} -eq 0 ]]; then
+            echo "Labels are up to date."
+            exit 0
+          fi
+          args=()
+          if [[ ${#add[@]} -gt 0 ]]; then args+=(--add-label "$(IFS=,; echo "${add[*]}")"); fi
+          if [[ ${#remove[@]} -gt 0 ]]; then args+=(--remove-label "$(IFS=,; echo "${remove[*]}")"); fi
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "${args[@]}"
+          echo "Added: ${add[*]:-none} / Removed: ${remove[*]:-none}"

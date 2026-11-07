@@ -20,6 +20,7 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 
 | ワークフロー | 説明 |
 |---|---|
+| `pr-title.yml` | PR のタイトルが Conventional Commits の形かをチェックし、種類に応じてラベルを付ける |
 | `create-release.yml` | タグから GitHub リリースを作る（リリースノートは自動生成） |
 
 ## 使い方
@@ -97,6 +98,40 @@ jobs:
       pull-requests: write
     uses: zaki3mymy/actions/.github/workflows/claude-fix.yml@main
     secrets: inherit
+```
+
+### PR のタイトル（`pr-title.yml`）
+
+PR のタイトルが `<type>(<scope>)!: <説明>` の形かをチェックする。`(<scope>)` と `!` は省略でき、説明は日本語でよい。形が違うときは、チェックが失敗する。
+
+- 使える type: `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert` `release`
+- develop から main へのリリース PR は `release: ...` にする。
+
+タイトルに合わせて、次のラベルを付ける。タイトルを変えたら、合わなくなったラベルは外す（外すのはこの4つだけ）。
+
+| タイトル | ラベル | 使いみち |
+|---|---|---|
+| `feat!:` など `!` 付き | `breaking` | リリースノートの「破壊的変更」、メジャーを上げる |
+| `feat:` | `feat` | リリースノートの「新機能」、マイナーを上げる |
+| `fix:` | `fix` | リリースノートの「バグ修正」 |
+| `release:` | `skip-release-notes` | リリースノートに載せない |
+
+Dependabot と fork の PR は、トークンが読み取り専用なのでラベルは付けない（タイトルのチェックだけを行う）。
+
+```yaml
+# .github/workflows/pr-title.yml
+name: PR Title
+run-name: "PR Title: ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }})"
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  pr-title:
+    permissions:
+      pull-requests: write
+    uses: zaki3mymy/actions/.github/workflows/pr-title.yml@main
 ```
 
 ### リリース（`create-release.yml`）
