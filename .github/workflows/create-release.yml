@@ -1,0 +1,50 @@
+name: Create Release
+
+# タグから GitHub リリースを作る。リリースノートは GitHub の自動生成を使い、
+# 呼び出し元のリポジトリの .github/release.yml でラベルごとの見出しに振り分ける。
+#
+# 注意：ノートの生成に使われるのは、タグのコミットにある .github/release.yml。
+# タグのコミットにこのファイルがないと、ノートは見出しなしの一覧になる。
+#
+# 呼び出し元のジョブには `permissions: contents: write` が必要。
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'リリースを作るタグ（例: v1.2.0）。タグは作成済みであること'
+        required: true
+        type: string
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 入力はスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
+          TAG: ${{ inputs.tag }}
+        run: |
+          # SemVer の形のタグだけを受け付ける（例: v1.2.3、v1.2.3-rc.1）
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not a SemVer tag (e.g. v1.2.3)"
+            exit 1
+          fi
+
+          # 同じタグのリリースがすでにあれば何もしない（再実行しても重複して作らない）
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipped."
+            exit 0
+          fi
+
+          args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag)
+          # v1.2.3-rc.1 のようにプレリリースの識別子が付くタグはプレリリースにする
+          if [[ "$TAG" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+
+          # --verify-tag: タグがなければ作らずに失敗する（タグは呼び出し元で作る）
+          gh release create "$TAG" "${args[@]}"
+          echo "Created release $TAG"

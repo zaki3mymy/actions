@@ -14,6 +14,14 @@ Claude Code を使った Issue ドリブン開発を自動化するワークフ�
 | `claude-review.yml` | PRをレビューし、コメントを残す |
 | `claude-fix.yml` | レビュー指摘を修正し、返信する |
 
+### リリース
+
+SemVer のタグと GitHub リリースを扱うワークフロー群。
+
+| ワークフロー | 説明 |
+|---|---|
+| `create-release.yml` | タグから GitHub リリースを作る（リリースノートは自動生成） |
+
 ## 使い方
 
 各リポジトリに薄いラッパーワークフローを置いて呼び出す。
@@ -90,6 +98,64 @@ jobs:
     uses: zaki3mymy/actions/.github/workflows/claude-fix.yml@main
     secrets: inherit
 ```
+
+### リリース（`create-release.yml`）
+
+タグから GitHub リリースを作る。リリースノートは GitHub の自動生成を使い、呼び出し元のリポジトリの `.github/release.yml` で、PR のラベルごとの見出しに振り分ける。
+
+- タグは作成済みであること（`--verify-tag` を付けるので、タグがなければ失敗する）。
+- タグは SemVer の形（`v1.2.3`、`v1.2.3-rc.1`）であること。`-` の付くタグはプレリリースにする。
+- 同じタグのリリースがすでにあれば、何もせずに成功する。
+- ノートの生成に使われるのは、**タグのコミットにある** `.github/release.yml`。タグのコミットにこのファイルがないと、ノートは見出しなしの一覧になる。
+- `GITHUB_TOKEN` で push したタグでは、ほかのワークフローが起動しない。ワークフローの中でタグを打つときは、タグの push を待たずに、同じワークフローからこのワークフローを呼ぶ。
+
+手でタグを push したときにリリースを作るラッパーの例：
+
+```yaml
+# .github/workflows/release.yml
+name: Release
+run-name: "Release: ${{ github.ref_name }}"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/create-release.yml@main
+    with:
+      tag: ${{ github.ref_name }}
+```
+
+`.github/release.yml` の例：
+
+```yaml
+changelog:
+  exclude:
+    labels:
+      - skip-release-notes
+  categories:
+    - title: 💥 破壊的変更
+      labels:
+        - breaking
+    - title: 🚀 新機能
+      labels:
+        - feat
+    - title: 🐛 バグ修正
+      labels:
+        - fix
+    - title: 📦 依存関係の更新
+      labels:
+        - dependencies
+    - title: 🔧 その他
+      labels:
+        - "*"
+```
+
+ラベル（`breaking`・`feat`・`fix`・`skip-release-notes`）は zaki3mymy/github の Terraform で作っている。
 
 ## 必要なシークレット
 
