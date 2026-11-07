@@ -20,6 +20,7 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 
 | ワークフロー | 説明 |
 |---|---|
+| `next-tag.yml` | 前のタグからの PR のラベルで次の SemVer のバージョンを決め、タグを打つ |
 | `create-release.yml` | タグから GitHub リリースを作る（リリースノートは自動生成） |
 
 ## 使い方
@@ -97,6 +98,41 @@ jobs:
       pull-requests: write
     uses: zaki3mymy/actions/.github/workflows/claude-fix.yml@main
     secrets: inherit
+```
+
+### 次のバージョンのタグ（`next-tag.yml`）
+
+前のタグからのコミットに含まれる PR のラベルを見て、次の SemVer のバージョンを決め、注釈付きのタグを打つ。本番のデプロイが成功した後に CD から呼び、出力のタグを `create-release.yml` に渡す。
+
+| 前のタグからの PR | 次のバージョン |
+|---|---|
+| `breaking` のラベルがある | メジャーを上げる（v1.2.3 → v2.0.0） |
+| `feat` のラベルがある | マイナーを上げる（v1.2.3 → v1.3.0） |
+| それ以外 | パッチを上げる（v1.2.3 → v1.2.4） |
+
+- `skip-release-notes` の PR（develop から main へのリリース PR など）は数えない。中身の個々の PR は、マージコミットで main に入るので、前のタグからのコミットに含まれる（リリース PR をスカッシュマージすると、中身の PR が数えられなくなる）。
+- 対象のコミットにすでに SemVer のタグがあれば、それを出力して新しいタグは打たない（再実行しても重複しない）。
+- 数える PR がなければ、タグを打たない（出力は空）。
+- 前のタグには、正式なタグ（`-rc.1` などが付かないもの）だけを使う。タグが1つもなければ `initial-version`（既定は `v0.1.0`）を打つ。
+- `GITHUB_TOKEN` で push したタグでは、ほかのワークフローは起動しない。リリースは、出力のタグで `create-release.yml` を直接呼んで作る。
+
+```yaml
+# CD（.github/workflows/cd.yml）の最後に足す例
+  tag:
+    needs: deploy
+    if: github.ref_name == 'main'
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/next-tag.yml@main
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/create-release.yml@main
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
 ```
 
 ### リリース（`create-release.yml`）

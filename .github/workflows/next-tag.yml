@@ -1,0 +1,123 @@
+name: Next Tag
+
+# 前のタグからの PR のラベルを見て、次の SemVer のバージョンを決め、タグを打つ。
+# 本番のデプロイが成功した後に CD から呼び、出力のタグを create-release.yml に渡す。
+#
+#   breaking のラベルの PR がある → メジャーを上げる（v1.2.3 → v2.0.0）
+#   feat のラベルの PR がある     → マイナーを上げる（v1.2.3 → v1.3.0）
+#   それ以外                     → パッチを上げる（v1.2.3 → v1.2.4）
+#
+# skip-release-notes のラベルの PR（develop から main へのリリース PR など）は数えない。
+# 中身の個々の PR は、マージコミットで main に入るので、前のタグからのコミットに含まれる。
+#
+# 呼び出し元のジョブには `permissions: contents: write` が必要。
+# GITHUB_TOKEN で push したタグでは、ほかのワークフローは起動しない。
+# リリースは、この出力を使って create-release.yml を直接呼んで作る。
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'タグを打つコミット。省略すると、呼び出したワークフローのコミット（github.sha）'
+        required: false
+        type: string
+        default: ''
+      initial-version:
+        description: 'タグがまだ1つもないときに打つバージョン'
+        required: false
+        type: string
+        default: 'v0.1.0'
+    outputs:
+      tag:
+        description: '打った（または対象のコミットにすでにあった）タグ。打たなかったときは空'
+        value: ${{ jobs.next-tag.outputs.tag }}
+
+jobs:
+  next-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 前のタグからのコミットを数えるため、すべての履歴とタグを取る
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide the next version and push the tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 入力はスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
+          REF: ${{ inputs.ref }}
+          INITIAL_VERSION: ${{ inputs.initial-version }}
+        run: |
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if ! [[ "$INITIAL_VERSION" =~ $semver ]]; then
+            echo "::error::initial-version '$INITIAL_VERSION' is not a SemVer tag (e.g. v1.0.0)"
+            exit 1
+          fi
+
+          target=$(git rev-parse --verify "${REF:-$GITHUB_SHA}^{commit}")
+          echo "Target commit: $target"
+
+          # 対象のコミットにすでに SemVer のタグがあれば、それを出力する（再実行しても重複して打たない）
+          existing=$(git tag --points-at "$target" | grep -E "$semver" | sort -V | tail -n 1 || true)
+          if [[ -n "$existing" ]]; then
+            echo "Tag $existing already points at $target."
+            echo "tag=$existing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 対象のコミットまでに打たれた、最新の正式なタグ（-rc などが付かないもの）
+          prev=$(git tag --merged "$target" | grep -E "$semver" | sort -V | tail -n 1 || true)
+          if [[ -z "$prev" ]]; then
+            next="$INITIAL_VERSION"
+            echo "No previous tag. Using initial version $next."
+          else
+            echo "Previous tag: $prev"
+            # 前のタグからのコミットに含まれる PR のラベルを集める
+            labels_file=$(mktemp)
+            pr_count=0
+            declare -A seen
+            for sha in $(git rev-list "$prev..$target"); do
+              while IFS=$'\t' read -r number labels; do
+                [[ -z "$number" || -n "${seen[$number]:-}" ]] && continue
+                seen[$number]=1
+                if grep -qxF skip-release-notes <<< "${labels//,/$'\n'}"; then
+                  echo "  #$number: skipped (skip-release-notes)"
+                  continue
+                fi
+                echo "  #$number: ${labels:-(no labels)}"
+                tr ',' '\n' <<< "$labels" >> "$labels_file"
+                pr_count=$((pr_count + 1))
+              done < <(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+                --jq '.[] | select(.merged_at != null) | [(.number | tostring), ([.labels[].name] | join(","))] | @tsv')
+            done
+
+            if [[ "$pr_count" -eq 0 ]]; then
+              echo "No pull requests since $prev. Skipped tagging."
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            [[ "$prev" =~ $semver ]]
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            patch=${BASH_REMATCH[3]}
+            if grep -qxF breaking "$labels_file"; then
+              next="v$((major + 1)).0.0"
+            elif grep -qxF feat "$labels_file"; then
+              next="v${major}.$((minor + 1)).0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+            echo "Next version: $next ($pr_count pull request(s) since $prev)"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$next" -m "$next" "$target"
+          git push origin "refs/tags/$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
