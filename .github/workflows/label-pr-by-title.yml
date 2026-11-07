@@ -1,6 +1,7 @@
-name: PR Title
+name: Label PR by Title
 
-# PR のタイトルが Conventional Commits の形かをチェックし、種類に応じてラベルを付ける。
+# PR のタイトルから、種類に応じたラベルを付ける。
+# タイトルは Conventional Commits の形であること（違う形のときは失敗する）。
 # ラベルは、リリースノートの見出し（.github/release.yml）と、次のバージョンの決定（next-tag.yml）に使う。
 #
 #   feat!: / fix!: など ! 付き → breaking（メジャーを上げる）
@@ -14,7 +15,7 @@ on:
   workflow_call:
 
 jobs:
-  pr-title:
+  label-pr-by-title:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

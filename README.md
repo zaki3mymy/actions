@@ -20,7 +20,7 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 
 | ワークフロー | 説明 |
 |---|---|
-| `pr-title.yml` | PR のタイトルが Conventional Commits の形かをチェックし、種類に応じてラベルを付ける |
+| `label-pr-by-title.yml` | PR のタイトル（Conventional Commits）から、種類に応じたラベルを付ける。タイトルの形が違うときは失敗する |
 | `create-release.yml` | タグから GitHub リリースを作る（リリースノートは自動生成） |
 
 ## 使い方
@@ -100,9 +100,9 @@ jobs:
     secrets: inherit
 ```
 
-### PR のタイトル（`pr-title.yml`）
+### PR のタイトルからラベルを付ける（`label-pr-by-title.yml`）
 
-PR のタイトルが `<type>(<scope>)!: <説明>` の形かをチェックする。`(<scope>)` と `!` は省略でき、説明は日本語でよい。形が違うときは、チェックが失敗する。
+PR のタイトルから、種類に応じたラベルを付ける。タイトルは `<type>(<scope>)!: <説明>` の形にする。`(<scope>)` と `!` は省略でき、説明は日本語でよい。形が違うときは、チェックが失敗する。
 
 - 使える type: `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert` `release`
 - develop から main へのリリース PR は `release: ...` にする。
@@ -119,19 +119,19 @@ PR のタイトルが `<type>(<scope>)!: <説明>` の形かをチェックす�
 Dependabot と fork の PR は、トークンが読み取り専用なのでラベルは付けない（タイトルのチェックだけを行う）。
 
 ```yaml
-# .github/workflows/pr-title.yml
-name: PR Title
-run-name: "PR Title: ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }})"
+# .github/workflows/label-pr-by-title.yml
+name: Label PR by Title
+run-name: "Label PR by Title: ${{ github.event.pull_request.title }} (#${{ github.event.pull_request.number }})"
 
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
 jobs:
-  pr-title:
+  label-pr-by-title:
     permissions:
       pull-requests: write
-    uses: zaki3mymy/actions/.github/workflows/pr-title.yml@main
+    uses: zaki3mymy/actions/.github/workflows/label-pr-by-title.yml@main
 ```
 
 ### リリース（`create-release.yml`）
