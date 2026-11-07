@@ -11,8 +11,8 @@ name: Next Tag
 # 中身の個々の PR は、マージコミットで main に入るので、前のタグからのコミットに含まれる。
 #
 # 呼び出し元のジョブには `permissions: contents: write` が必要。
-# GITHUB_TOKEN で push したタグでは、ほかのワークフローは起動しない。
-# リリースは、この出力を使って create-release.yml を直接呼んで作る。
+# GITHUB_TOKEN で push したタグでは、タグの push で動くほかのワークフローは起動しない。
+# タグを使う処理は、呼び出し元で出力のタグを使って行う。
 on:
   workflow_call:
     inputs:
