@@ -151,6 +151,18 @@ jobs:
 - 前のタグには、正式なタグ（`-rc.1` などが付かないもの）だけを使う。タグが1つもなければ `initial-version`（既定は `v0.0.1`）を打つ。
 - `GITHUB_TOKEN` で push したタグでは、タグの push で動くほかのワークフローは起動しない。タグを使う処理は、呼び出し元で出力のタグを使って行う。
 
+| 入力 | 既定 | 内容 |
+|---|---|---|
+| `ref` | 呼び出したワークフローのコミット | タグを打つコミット |
+| `initial-version` | `v0.0.1` | タグがまだ1つもないときに打つバージョン |
+| `push` | `true` | `false` のときは、次のバージョンを決めて出力するだけで、タグは打たない |
+| `tag` | （空） | 指定すると、PR のラベルからバージョンを決めずに、このタグを打つ。前のタグより新しいバージョンであること |
+
+| 出力 | 内容 |
+|---|---|
+| `tag` | 打ったタグ（`push: false` のときは打つ予定のタグ、対象のコミットにすでにタグがあればそのタグ）。打たないときは空 |
+| `previous-tag` | 対象のコミットまでに打たれた、最新の正式なタグ（対象のコミットのタグを含む）。タグが1つもなければ空 |
+
 ```yaml
 # CD（.github/workflows/cd.yml）の最後に足す例
   tag:
@@ -168,6 +180,34 @@ jobs:
     uses: zaki3mymy/actions/.github/workflows/create-release.yml@main
     with:
       tag: ${{ needs.tag.outputs.tag }}
+```
+
+デプロイの前にバージョンを知りたいとき（ドキュメントに埋め込むなど）は、2回に分けて呼ぶ。1回目は `push: false` でバージョンを決めるだけにし、2回目はその値を `tag` に渡してタグを打つ。2回目で計算し直さないので、デプロイしたものと打つタグが必ず一致する。
+
+```yaml
+  version:
+    if: github.ref_name == 'main'
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/next-tag.yml@main
+    with:
+      push: false
+
+  deploy:
+    needs: version
+    # 打たないとき（数える PR がないとき）は、前のタグを使う
+    env:
+      VERSION: ${{ needs.version.outputs.tag || needs.version.outputs.previous-tag }}
+    # ...
+
+  tag:
+    needs: [version, deploy]
+    if: needs.version.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/next-tag.yml@main
+    with:
+      tag: ${{ needs.version.outputs.tag }}
 ```
 
 ### リリース（`create-release.yml`）
