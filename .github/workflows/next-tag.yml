@@ -10,7 +10,11 @@ name: Next Tag
 # skip-release-notes のラベルの PR（develop から main へのリリース PR など）は数えない。
 # 中身の個々の PR は、マージコミットで main に入るので、前のタグからのコミットに含まれる。
 #
-# 呼び出し元のジョブには `permissions: contents: write` が必要。
+# デプロイの前にバージョンを知りたいとき（ドキュメントに埋め込むなど）は、2回に分けて呼ぶ。
+#   1回目: push: false で、次のバージョンを決めて出力するだけにする（タグは打たない）
+#   2回目: tag に1回目の出力を渡して、そのタグを打つ（計算し直さないので、1回目と必ず一致する）
+#
+# 呼び出し元のジョブには `permissions: contents: write` が必要（push: false のときも）。
 # GITHUB_TOKEN で push したタグでは、タグの push で動くほかのワークフローは起動しない。
 # タグを使う処理は、呼び出し元で出力のタグを使って行う。
 on:
@@ -26,10 +30,23 @@ on:
         required: false
         type: string
         default: 'v0.0.1'
+      push:
+        description: 'false のときは、次のバージョンを決めて出力するだけで、タグは打たない'
+        required: false
+        type: boolean
+        default: true
+      tag:
+        description: '打つタグ（例: v1.3.0）。指定すると、PR のラベルからバージョンを決めずに、このタグを打つ'
+        required: false
+        type: string
+        default: ''
     outputs:
       tag:
-        description: '打った（または対象のコミットにすでにあった）タグ。打たなかったときは空'
+        description: '打った（push: false のときは打つ予定の、または対象のコミットにすでにあった）タグ。打たないときは空'
         value: ${{ jobs.next-tag.outputs.tag }}
+      previous-tag:
+        description: '対象のコミットまでに打たれた、最新の正式なタグ（対象のコミットのタグを含む）。タグが1つもなければ空'
+        value: ${{ jobs.next-tag.outputs.previous-tag }}
 
 jobs:
   next-tag:
@@ -38,6 +55,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      previous-tag: ${{ steps.tag.outputs.previous-tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,27 +70,52 @@ jobs:
           # 入力はスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
           REF: ${{ inputs.ref }}
           INITIAL_VERSION: ${{ inputs.initial-version }}
+          PUSH: ${{ inputs.push }}
+          TAG: ${{ inputs.tag }}
         run: |
           semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
           if ! [[ "$INITIAL_VERSION" =~ $semver ]]; then
             echo "::error::initial-version '$INITIAL_VERSION' is not a SemVer tag (e.g. v1.0.0)"
             exit 1
           fi
+          if [[ -n "$TAG" ]] && ! [[ "$TAG" =~ $semver ]]; then
+            echo "::error::tag '$TAG' is not a SemVer tag (e.g. v1.0.0)"
+            exit 1
+          fi
 
           target=$(git rev-parse --verify "${REF:-$GITHUB_SHA}^{commit}")
           echo "Target commit: $target"
 
+          # 対象のコミットまでに打たれた、最新の正式なタグ（-rc などが付かないもの）
+          prev=$(git tag --merged "$target" | grep -E "$semver" | sort -V | tail -n 1 || true)
+          echo "previous-tag=$prev" >> "$GITHUB_OUTPUT"
+
           # 対象のコミットにすでに SemVer のタグがあれば、それを出力する（再実行しても重複して打たない）
           existing=$(git tag --points-at "$target" | grep -E "$semver" | sort -V | tail -n 1 || true)
           if [[ -n "$existing" ]]; then
+            if [[ -n "$TAG" && "$TAG" != "$existing" ]]; then
+              echo "::error::$target already has tag $existing, but tag '$TAG' was requested"
+              exit 1
+            fi
             echo "Tag $existing already points at $target."
             echo "tag=$existing" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # 対象のコミットまでに打たれた、最新の正式なタグ（-rc などが付かないもの）
-          prev=$(git tag --merged "$target" | grep -E "$semver" | sort -V | tail -n 1 || true)
-          if [[ -z "$prev" ]]; then
+          if [[ -n "$TAG" ]]; then
+            # 指定されたタグを打つ。前のタグより新しいバージョンであることだけを確かめる
+            newest=$(printf '%s\n%s\n' "$prev" "$TAG" | sort -V | tail -n 1)
+            if [[ -n "$prev" && ( "$TAG" == "$prev" || "$newest" != "$TAG" ) ]]; then
+              echo "::error::tag '$TAG' is not newer than the previous tag $prev"
+              exit 1
+            fi
+            if git rev-parse --verify --quiet "refs/tags/$TAG" > /dev/null; then
+              echo "::error::tag '$TAG' already exists on another commit"
+              exit 1
+            fi
+            next="$TAG"
+            echo "Using the given tag $next."
+          elif [[ -z "$prev" ]]; then
             next="$INITIAL_VERSION"
             echo "No previous tag. Using initial version $next."
           else
@@ -114,6 +157,12 @@ jobs:
               next="v${major}.${minor}.$((patch + 1))"
             fi
             echo "Next version: $next ($pr_count pull request(s) since $prev)"
+          fi
+
+          if [[ "$PUSH" != "true" ]]; then
+            echo "push is false. Skipped pushing $next."
+            echo "tag=$next" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           git config user.name "github-actions[bot]"
