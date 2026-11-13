@@ -23,6 +23,8 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 | `label-pr-by-title.yml` | PR のタイトル（Conventional Commits）から、種類に応じたラベルを付ける。タイトルの形が違うときは失敗する |
 | `next-tag.yml` | 前のタグからの PR のラベルで次の SemVer のバージョンを決め、タグを打つ |
 | `create-release.yml` | タグから GitHub リリースを作る（リリースノートは自動生成） |
+| `release-pr.yml` | develop → main のリリース PR を、次のバージョンとリリースノートで作る（すでにあれば更新する） |
+| `back-merge.yml` | main を develop に取り込む（main → develop の PR を作り、マージコミットでマージする） |
 
 ## 使い方
 
@@ -268,6 +270,69 @@ changelog:
 
 ラベル（`breaking`・`feat`・`fix`・`skip-release-notes`）は zaki3mymy/github の Terraform で作っている。
 
+### リリース PR（`release-pr.yml`）
+
+develop → main のリリース PR を作る。「リリースする」と決めたときに、ラッパーを手で実行する。
+
+- 次のバージョンは `next-tag.yml` を `push: false` で呼んで決める（タグは打たない。タグは main のデプロイの後に CD が打つ）。
+- タイトルは `release: <次のバージョン> (develop → main)`。本文は、前のタグからの PR を `.github/release.yml` の見出しに振り分けたリリースノート。
+- develop → main の PR がすでに開いていれば、タイトルと本文を最新にする。前のタグから数える PR がなければ、PR を作らない。
+- PR は GitHub App のトークンで作る（`GITHUB_TOKEN` で作った PR では CI が起動しないため）。App は `back-merge.yml` と同じものを使う。
+- マージは人が「Create a merge commit」で行う（スカッシュすると、中身の PR が `next-tag.yml` で数えられなくなる）。
+
+| 入力 | 既定 | 内容 |
+|---|---|---|
+| `from` | `develop` | リリースする開発のブランチ（PR の head） |
+| `to` | `main` | リリース先のブランチ（PR の base） |
+
+| 出力 | 内容 |
+|---|---|
+| `tag` | リリースする次のバージョン。リリースするものがなければ空 |
+
+```yaml
+# .github/workflows/release-pr.yml
+name: Create release PR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release-pr:
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/release-pr.yml@main
+    secrets:
+      BACK_MERGE_APP_CLIENT_ID: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
+      BACK_MERGE_APP_PRIVATE_KEY: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+```
+
+### main を develop に取り込む（`back-merge.yml`）
+
+タグは main のマージコミットに打つので、main を develop に取り込んで、develop の履歴からもタグを辿れるようにする。本番のリリースの後に、CD から呼ぶ。
+
+- main と同じコミットを指す一時的なブランチ（`back-merge/<sha>`）から、develop への PR を作り、マージコミットでマージする。develop がすでに main を含んでいれば、何もしない。
+- PR の作成とマージは、取り込み専用の GitHub App のトークンで行う。develop への PR をスカッシュだけに制限していても、App を develop の ruleset の対象外（`bypass_mode = "exempt"`）にしておけば、マージコミットでマージできる（個人アカウントのリポジトリでは、`GITHUB_TOKEN` をバイパスに入れられないため）。
+- PR には `skip-release-notes` を付ける（次のバージョンの計算とノートに含めない）。
+- 自動でマージできないとき（コンフリクトなど）は、PR を開いたまま残してジョブを失敗させる。PR はリポジトリのオーナーにアサインする。
+
+| 入力 | 既定 | 内容 |
+|---|---|---|
+| `from` | `main` | 取り込む元のブランチ（リリース先） |
+| `to` | `develop` | 取り込む先のブランチ（開発のブランチ） |
+
+```yaml
+# CD（.github/workflows/cd.yml）の最後に足す例
+  back-merge:
+    needs: deploy
+    if: github.ref_name == 'main'
+    permissions:
+      contents: read
+    uses: zaki3mymy/actions/.github/workflows/back-merge.yml@main
+    secrets:
+      BACK_MERGE_APP_CLIENT_ID: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
+      BACK_MERGE_APP_PRIVATE_KEY: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+```
+
 ## 必要なシークレット
 
 | シークレット | 説明 |
@@ -277,3 +342,5 @@ changelog:
 | `CLAUDE_REVIEW_APP_ID` | ClaudeReview GitHub App の App ID |
 | `CLAUDE_REVIEW_APP_PRIVATE_KEY` | ClaudeReview GitHub App の秘密鍵 |
 | `ANTHROPIC_API_KEY` | Anthropic OAuth トークン |
+| `BACK_MERGE_APP_CLIENT_ID` | `release-pr.yml`・`back-merge.yml` で使う GitHub App の Client ID（App ID とは別の値） |
+| `BACK_MERGE_APP_PRIVATE_KEY` | 上の GitHub App の秘密鍵 |

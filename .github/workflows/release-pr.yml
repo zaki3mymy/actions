@@ -1,0 +1,117 @@
+name: Release PR
+
+# 開発のブランチ（既定は develop）→ リリース先のブランチ（既定は main）のリリース PR を作る。
+# 「リリースする」と決めたときに、呼び出し元のワークフローを手で実行する（workflow_dispatch）想定。
+#
+# - 次のバージョンは next-tag.yml を push: false で呼んで決める（タグは打たない）。
+#   タグは、main のデプロイの後に呼び出し元の CD が打つ
+# - タイトルは「release: <次のバージョン> (develop → main)」。release: なので、label-pr-by-title.yml で skip-release-notes が付く
+# - 本文は GitHub のリリースノートの自動生成（呼び出し元の .github/release.yml の見出し）で作る
+# - develop → main の PR がすでに開いていれば、タイトルと本文を最新にする
+# - 前のタグから数える PR がない（リリースするものがない）ときは、PR を作らない
+# - PR の作成は GitHub App のトークンで行う（シークレットの BACK_MERGE_APP_CLIENT_ID・BACK_MERGE_APP_PRIVATE_KEY。
+#   GITHUB_TOKEN で作った PR では CI が起動しないため）
+# - マージは人が行う（マージコミットで。main へのマージが本番のデプロイになる）
+#
+# 呼び出し元のジョブには `permissions: contents: write` が必要（next-tag.yml が要るため。タグは打たない）。
+on:
+  workflow_call:
+    inputs:
+      from:
+        description: 'リリースする開発のブランチ（PR の head）'
+        required: false
+        type: string
+        default: 'develop'
+      to:
+        description: 'リリース先のブランチ（PR の base）'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      BACK_MERGE_APP_CLIENT_ID:
+        description: 'PR を作る GitHub App の Client ID'
+        required: true
+      BACK_MERGE_APP_PRIVATE_KEY:
+        description: 'PR を作る GitHub App の秘密鍵'
+        required: true
+    outputs:
+      tag:
+        description: 'リリースする次のバージョン。リリースするものがなければ空'
+        value: ${{ jobs.version.outputs.tag }}
+
+jobs:
+  version:
+    permissions:
+      contents: write
+    uses: zaki3mymy/actions/.github/workflows/next-tag.yml@main
+    with:
+      ref: origin/${{ inputs.from }}
+      push: false
+
+  release-pr:
+    needs: version
+    runs-on: ubuntu-latest
+    name: Create or update the release PR
+    permissions:
+      contents: read
+    steps:
+      - name: Nothing to release
+        if: needs.version.outputs.tag == ''
+        env:
+          PREVIOUS_TAG: ${{ needs.version.outputs.previous-tag }}
+        run: |
+          echo "::warning::前のタグ（${PREVIOUS_TAG:-なし}）から数える PR がないので、リリース PR は作りません"
+
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        if: needs.version.outputs.tag != ''
+        id: app-token
+        with:
+          client-id: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+
+      - name: Create or update the release PR
+        if: needs.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # 入力はスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
+          TAG: ${{ needs.version.outputs.tag }}
+          PREVIOUS_TAG: ${{ needs.version.outputs.previous-tag }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          title="release: $TAG ($FROM → $TO)"
+
+          # 前のタグから開発のブランチまでの PR を、.github/release.yml の見出しに振り分けたノート
+          args=(-f "tag_name=$TAG" -f "target_commitish=$FROM")
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            args+=(-f "previous_tag_name=$PREVIOUS_TAG")
+          fi
+          notes=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body)
+
+          body_file=$(mktemp)
+          {
+            echo "$FROM を $TO にリリースします。マージすると本番にデプロイされ、CD が \`$TAG\` のタグとリリースを作ります。"
+            echo
+            echo "**マージは「Create a merge commit」で行ってください。**"
+            echo
+            echo "$notes"
+            echo
+            echo "---"
+            echo "「$GITHUB_WORKFLOW」のワークフローで作りました: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$body_file"
+
+          url=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$TO" --head "$FROM" --state open --json url --jq '.[0].url // ""')
+          if [[ -n "$url" ]]; then
+            gh pr edit "$url" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body_file"
+            echo "Updated $url"
+          else
+            url=$(gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base "$TO" \
+              --head "$FROM" \
+              --title "$title" \
+              --body-file "$body_file" \
+              --label skip-release-notes \
+              --assignee "$GITHUB_REPOSITORY_OWNER")
+            echo "Created $url"
+          fi
+          echo "### リリース PR: $url" >> "$GITHUB_STEP_SUMMARY"
