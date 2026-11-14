@@ -54,14 +54,14 @@ jobs:
           TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
           BODY=$(echo "$ISSUE_JSON" | jq -r '.body // ""')
           BRANCH="feature/issue-${NUMBER}"
-          echo "number=$NUMBER" >> $GITHUB_OUTPUT
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           {
+            echo "number=$NUMBER"
+            echo "title=$TITLE"
+            echo "branch=$BRANCH"
             echo "body<<EOF"
             echo "$BODY"
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Configure git
         run: |

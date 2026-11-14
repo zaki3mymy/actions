@@ -69,7 +69,7 @@ jobs:
             echo "comments<<EOF"
             echo "$COMMENTS"
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Configure git
         run: |
