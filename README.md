@@ -32,7 +32,7 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 
 | ワークフロー | 説明 |
 |---|---|
-| `actionlint.yml` | PR で追加・変更したワークフローを [actionlint](https://github.com/rhysd/actionlint) で検査する（手動で実行したときはすべてを検査する） |
+| `actionlint.yml` | ワークフローに変更のある PR で、すべてのワークフローを [actionlint](https://github.com/rhysd/actionlint) で検査する（手動でも実行できる） |
 
 ## 使い方
 
