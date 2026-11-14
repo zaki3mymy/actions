@@ -26,6 +26,14 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 | `release-pr.yml` | develop → main のリリース PR を、次のバージョンとリリースノートで作る（すでにあれば更新する） |
 | `back-merge.yml` | main を develop に取り込む（main → develop の PR を作り、マージコミットでマージする） |
 
+### このリポジトリの CI
+
+再利用ワークフローではなく、このリポジトリ自身で動くワークフロー。
+
+| ワークフロー | 説明 |
+|---|---|
+| `actionlint.yml` | PR で追加・変更したワークフローを [actionlint](https://github.com/rhysd/actionlint) で検査する（手動で実行したときはすべてを検査する） |
+
 ## 使い方
 
 各リポジトリに薄いラッパーワークフローを置いて呼び出す。

@@ -1,0 +1,54 @@
+name: actionlint
+
+# このリポジトリのワークフローを actionlint で検査する（このリポジトリ自身の CI。再利用ワークフローではない）。
+#
+#   pull_request      → PR で追加・変更したワークフローだけを検査する
+#   workflow_dispatch → すべてのワークフローを検査する
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_VERSION: "1.7.12"
+  # download-actionlint.bash を取ってくるコミット（v1.7.12 のタグ）
+  ACTIONLINT_SCRIPT_SHA: "914e7df21a07ef503a81201c76d2b11c789d3fca"
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # PR ではマージコミットとその親（ベースブランチの先端）を比べるので、2 つ分の履歴を取る
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/$ACTIONLINT_SCRIPT_SHA/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION" "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Run actionlint
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            actionlint -color
+            exit 0
+          fi
+
+          # HEAD は PR のマージコミット、HEAD^1 はベースブランチの先端。消したファイルは除く
+          mapfile -t files < <(git diff --name-only --diff-filter=d HEAD^1 HEAD -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+          if (( ${#files[@]} == 0 )); then
+            echo "検査するワークフローの変更はありません"
+            exit 0
+          fi
+
+          printf '検査するファイル:\n'
+          printf '  %s\n' "${files[@]}"
+          actionlint -color "${files[@]}"
