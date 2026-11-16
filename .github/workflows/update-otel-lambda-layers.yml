@@ -12,8 +12,9 @@ name: Update OTel Lambda layers
 #   レイヤーに無い opentelemetry-instrumentation-*（urllib など、アプリが自分のレイヤーで足すもの）は、
 #   opentelemetry-instrumentation と同じバージョンにする（python-contrib のパッケージはバージョンが同じ）
 # - すでに最新なら何もしない。PR がすでに開いていれば、同じブランチに push し直して更新する
-# - PR の作成は GitHub App のトークンで行う（シークレットの BACK_MERGE_APP_CLIENT_ID・BACK_MERGE_APP_PRIVATE_KEY。
-#   GITHUB_TOKEN で作った PR では CI が起動しないため）
+# - PR の作成は GitHub App のトークンで行う（シークレットの PR_APP_CLIENT_ID・PR_APP_PRIVATE_KEY。
+#   GITHUB_TOKEN で作った PR では CI が起動しないため）。どの App を使うかは呼び出し元が決める。
+#   App に要る権限は Contents と Pull requests の write だけ（ruleset の対象外にする必要はない）
 #
 # opentelemetry-lambda のリリースは feed-release-invoke-workflow の repository_dispatch で知る想定。
 # どの言語のレイヤーのリリースでも起動されるので、このワークフローで最新のタグを見て、変わっていなければ何もしない。
@@ -35,10 +36,10 @@ on:
         type: string
         default: 'main'
     secrets:
-      BACK_MERGE_APP_CLIENT_ID:
+      PR_APP_CLIENT_ID:
         description: 'PR を作る GitHub App の Client ID'
         required: true
-      BACK_MERGE_APP_PRIVATE_KEY:
+      PR_APP_PRIVATE_KEY:
         description: 'PR を作る GitHub App の秘密鍵'
         required: true
 
@@ -56,8 +57,8 @@ jobs:
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:
-          client-id: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+          client-id: ${{ secrets.PR_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PR_APP_PRIVATE_KEY }}
 
       # App のトークンで push するため、checkout にもそのトークンを使う
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
