@@ -26,6 +26,12 @@ SemVer のタグと GitHub リリースを扱うワークフロー群。
 | `release-pr.yml` | develop → main のリリース PR を、次のバージョンとリリースノートで作る（すでにあれば更新する） |
 | `back-merge.yml` | main を develop に取り込む（main → develop の PR を作り、マージコミットでマージする） |
 
+### 依存関係
+
+| ワークフロー | 説明 |
+|---|---|
+| `update-otel-lambda-layers.yml` | OTel のコミュニティの Lambda レイヤー（Python 計装・Collector）の新しいバージョンが出ていたら、レイヤーの ARN と `pyproject.toml` の OTel の依存を上げる PR を作る |
+
 ### このリポジトリの CI
 
 再利用ワークフローではなく、このリポジトリ自身で動くワークフロー。
@@ -341,6 +347,50 @@ jobs:
       BACK_MERGE_APP_PRIVATE_KEY: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
 ```
 
+### OTel の Lambda レイヤーを上げる（`update-otel-lambda-layers.yml`）
+
+[opentelemetry-lambda](https://github.com/open-telemetry/opentelemetry-lambda) の Python 計装レイヤーと Collector レイヤーの新しいバージョンが出ていたら、呼び出し元のリポジトリでレイヤーを上げる PR を作る。Dependabot はレイヤーの ARN を見ないので、その代わり。
+
+- 最新のバージョンは `layer-python/*`・`layer-collector/*` のタグで決める。どちらも今の ARN と同じなら、何もしない。
+- `terraform-files` の中のレイヤーの ARN（`…:layer:opentelemetry-python-0_22_0:1` など）を書き換える。リージョン・アカウント・Collector のアーキテクチャは今の ARN のものを使い、ARN の最後のレイヤーのバージョンはリリースノートに載っている ARN から取る。
+- `pyproject.toml` の `opentelemetry-*` の依存を、Python 計装レイヤーのタグの `requirements.txt`・`nodeps-requirements.txt` のバージョンに `==` で固定し、`uv lock` する。ローカルと本番のバージョンをそろえるため。レイヤーに無い `opentelemetry-instrumentation-*`（アプリが自分のレイヤーで足す urllib など）は、`opentelemetry-instrumentation` と同じバージョンにする。
+  - 呼び出し元では、Dependabot の `uv` で `opentelemetry-*` を `ignore` にしておく（このワークフロー以外で上がらないようにする）。
+- PR は `update-otel-lambda-layers` のブランチから作る。すでに開いていれば、push し直して更新する。PR の作成は `release-pr.yml` と同じ GitHub App のトークンで行う（`GITHUB_TOKEN` で作った PR では CI が起動しないため）。
+
+opentelemetry-lambda のリリースは、[feed-release-invoke-workflow](https://github.com/zaki3mymy/feed-release-invoke-workflow) の `repository_dispatch` で知る想定。どの言語のレイヤーのリリースでも起動されるが、このワークフローで最新のタグを見るので問題ない。取りこぼしに備えて、`schedule` でも定期的に動かす。
+
+| 入力 | 既定 | 内容 |
+|---|---|---|
+| `terraform-files` | （必須） | レイヤーの ARN が書かれた Terraform のファイル（スペースか改行で区切る） |
+| `python-project` | `.` | `pyproject.toml` と `uv.lock` があるディレクトリ |
+| `base` | `main` | PR の向き先のブランチ |
+
+```yaml
+# .github/workflows/update-otel-lambda-layers.yml
+name: Update OTel Lambda layers
+
+on:
+  repository_dispatch:
+    types: [otel-lambda-release]
+  schedule:
+    - cron: "17 0 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: update-otel-lambda-layers
+
+jobs:
+  update:
+    permissions:
+      contents: read
+    uses: zaki3mymy/actions/.github/workflows/update-otel-lambda-layers.yml@main
+    with:
+      terraform-files: tf/main.tf
+    secrets:
+      BACK_MERGE_APP_CLIENT_ID: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
+      BACK_MERGE_APP_PRIVATE_KEY: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+```
+
 ## 必要なシークレット
 
 | シークレット | 説明 |
@@ -350,5 +400,5 @@ jobs:
 | `CLAUDE_REVIEW_APP_ID` | ClaudeReview GitHub App の App ID |
 | `CLAUDE_REVIEW_APP_PRIVATE_KEY` | ClaudeReview GitHub App の秘密鍵 |
 | `ANTHROPIC_API_KEY` | Anthropic OAuth トークン |
-| `BACK_MERGE_APP_CLIENT_ID` | `release-pr.yml`・`back-merge.yml` で使う GitHub App の Client ID（App ID とは別の値） |
+| `BACK_MERGE_APP_CLIENT_ID` | `release-pr.yml`・`back-merge.yml`・`update-otel-lambda-layers.yml` で使う GitHub App の Client ID（App ID とは別の値） |
 | `BACK_MERGE_APP_PRIVATE_KEY` | 上の GitHub App の秘密鍵 |

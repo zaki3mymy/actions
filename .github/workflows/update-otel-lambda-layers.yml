@@ -1,0 +1,257 @@
+name: Update OTel Lambda layers
+
+# OTel のコミュニティの Lambda レイヤー（open-telemetry/opentelemetry-lambda の Python 計装レイヤーと Collector レイヤー）の
+# 新しいバージョンが出ていたら、呼び出し元のリポジトリでレイヤーを上げる PR を作る。
+#
+# - 最新のバージョンは layer-python/* と layer-collector/* のタグで決める
+# - レイヤーの ARN は、呼び出し元の Terraform のファイル（terraform-files）の中の文字列を書き換える。
+#   リージョン・アカウント・Collector のアーキテクチャは今の ARN のものを使い、
+#   レイヤーのバージョン（ARN の最後の :N）はリリースノートに載っている ARN から取る
+# - Python 計装レイヤーのタグの requirements.txt・nodeps-requirements.txt にあるバージョンに合わせて、
+#   pyproject.toml の opentelemetry-* の依存を == で固定し、uv lock する（ローカルと本番のバージョンをそろえる）。
+#   レイヤーに無い opentelemetry-instrumentation-*（urllib など、アプリが自分のレイヤーで足すもの）は、
+#   opentelemetry-instrumentation と同じバージョンにする（python-contrib のパッケージはバージョンが同じ）
+# - すでに最新なら何もしない。PR がすでに開いていれば、同じブランチに push し直して更新する
+# - PR の作成は GitHub App のトークンで行う（シークレットの BACK_MERGE_APP_CLIENT_ID・BACK_MERGE_APP_PRIVATE_KEY。
+#   GITHUB_TOKEN で作った PR では CI が起動しないため）
+#
+# opentelemetry-lambda のリリースは feed-release-invoke-workflow の repository_dispatch で知る想定。
+# どの言語のレイヤーのリリースでも起動されるので、このワークフローで最新のタグを見て、変わっていなければ何もしない。
+on:
+  workflow_call:
+    inputs:
+      terraform-files:
+        description: 'レイヤーの ARN が書かれた Terraform のファイル（スペースか改行で区切る）'
+        required: true
+        type: string
+      python-project:
+        description: 'pyproject.toml と uv.lock があるディレクトリ'
+        required: false
+        type: string
+        default: '.'
+      base:
+        description: 'PR の向き先のブランチ'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      BACK_MERGE_APP_CLIENT_ID:
+        description: 'PR を作る GitHub App の Client ID'
+        required: true
+      BACK_MERGE_APP_PRIVATE_KEY:
+        description: 'PR を作る GitHub App の秘密鍵'
+        required: true
+
+env:
+  UPSTREAM_REPO: open-telemetry/opentelemetry-lambda
+  BRANCH: update-otel-lambda-layers
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    name: Update OTel Lambda layers
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.BACK_MERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BACK_MERGE_APP_PRIVATE_KEY }}
+
+      # App のトークンで push するため、checkout にもそのトークンを使う
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.base }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Find the latest layer versions
+        id: latest
+        run: |
+          latest() {
+            git ls-remote --tags --refs "https://github.com/$UPSTREAM_REPO" "$1/*" \
+              | sed -E "s|.*refs/tags/$1/||" \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -n 1
+          }
+          python=$(latest layer-python)
+          collector=$(latest layer-collector)
+          if [[ -z "$python" || -z "$collector" ]]; then
+            echo "::error::最新のタグが見つかりません（python=$python collector=$collector）"
+            exit 1
+          fi
+          echo "python=$python" >> "$GITHUB_OUTPUT"
+          echo "collector=$collector" >> "$GITHUB_OUTPUT"
+          echo "最新: layer-python/$python, layer-collector/$collector"
+
+      - name: Update the layer ARNs and the OTel dependencies
+        id: update
+        env:
+          # 入力はスクリプトに直接埋め込まず、環境変数で渡す（コマンドの注入を防ぐため）
+          GH_TOKEN: ${{ github.token }}
+          TERRAFORM_FILES: ${{ inputs.terraform-files }}
+          PYTHON_PROJECT: ${{ inputs.python-project }}
+          PYTHON_VERSION: ${{ steps.latest.outputs.python }}
+          COLLECTOR_VERSION: ${{ steps.latest.outputs.collector }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import tomllib
+          import urllib.request
+          from pathlib import Path
+
+          upstream = os.environ["UPSTREAM_REPO"]
+          python_version = os.environ["PYTHON_VERSION"]
+          collector_version = os.environ["COLLECTOR_VERSION"]
+          tf_files = [Path(p) for p in os.environ["TERRAFORM_FILES"].split()]
+
+          # arn:aws:lambda:<region>:<account>:layer:opentelemetry-python-0_21_0:1
+          # arn:aws:lambda:<region>:<account>:layer:opentelemetry-collector-amd64-0_24_0:1
+          arn_re = re.compile(
+              r"arn:aws:lambda:(?P<region>[a-z0-9-]+):(?P<account>\d+):layer:"
+              r"opentelemetry-(?P<kind>python|collector-(?:amd64|arm64))-(?P<ver>\d+_\d+_\d+):(?P<n>\d+)"
+          )
+
+          def release_body(tag: str) -> str:
+              out = subprocess.run(
+                  ["gh", "api", f"repos/{upstream}/releases/tags/{tag}", "--jq", ".body"],
+                  check=True, capture_output=True, text=True,
+              )
+              return out.stdout
+
+          bodies = {}
+
+          def new_arn(m: re.Match) -> str:
+              kind = m["kind"]
+              if kind == "python":
+                  tag, ver = f"layer-python/{python_version}", python_version
+              else:
+                  tag, ver = f"layer-collector/{collector_version}", collector_version
+              if tag not in bodies:
+                  bodies[tag] = release_body(tag)
+              layer = f"opentelemetry-{kind}-{ver.replace('.', '_')}"
+              found = re.search(
+                  rf"arn:aws:lambda:{re.escape(m['region'])}:{m['account']}:layer:{re.escape(layer)}:\d+",
+                  bodies[tag],
+              )
+              if not found:
+                  raise SystemExit(f"{tag} のリリースノートに {m['region']} の {layer} の ARN がありません")
+              return found[0]
+
+          changed = []
+          for path in tf_files:
+              text = path.read_text()
+              if not arn_re.search(text):
+                  raise SystemExit(f"{path} にレイヤーの ARN がありません")
+              updated = arn_re.sub(new_arn, text)
+              if updated != text:
+                  path.write_text(updated)
+                  changed.append(str(path))
+
+          # Python 計装レイヤーに入っているパッケージのバージョン
+          pins = {}
+          for name in ("requirements.txt", "nodeps-requirements.txt"):
+              url = (
+                  f"https://raw.githubusercontent.com/{upstream}/layer-python/{python_version}"
+                  f"/python/src/otel/otel_sdk/{name}"
+              )
+              with urllib.request.urlopen(url) as res:
+                  for line in res.read().decode().splitlines():
+                      line = line.split("#", 1)[0].strip()
+                      if "==" in line:
+                          pkg, ver = line.split("==", 1)
+                          pins[pkg.strip().lower()] = ver.strip()
+
+          project = Path(os.environ["PYTHON_PROJECT"])
+          pyproject = project / "pyproject.toml"
+          text = pyproject.read_text()
+          deps = tomllib.loads(text)["project"]["dependencies"]
+          new_text = text
+          for dep in deps:
+              name = re.match(r"[A-Za-z0-9_.-]+", dep)[0].lower().replace("_", "-")
+              if not name.startswith("opentelemetry-"):
+                  continue
+              if name in pins:
+                  ver = pins[name]
+              elif name.startswith("opentelemetry-instrumentation-"):
+                  ver = pins["opentelemetry-instrumentation"]
+              else:
+                  raise SystemExit(f"{name} のバージョンがレイヤーの requirements.txt にありません")
+              new_text = new_text.replace(f'"{dep}"', f'"{name}=={ver}"')
+          if new_text != text:
+              pyproject.write_text(new_text)
+              changed.append(str(pyproject))
+
+          if changed:
+              subprocess.run(["uv", "lock"], cwd=project, check=True)
+
+          print("changed:", changed)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"instrumentation={pins.get('opentelemetry-instrumentation', '')}\n")
+              f.write(f"sdk={pins.get('opentelemetry-sdk', '')}\n")
+          PY
+
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "すでに最新です"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat
+          fi
+
+      - name: Create or update the PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          BASE: ${{ inputs.base }}
+          PYTHON_VERSION: ${{ steps.latest.outputs.python }}
+          COLLECTOR_VERSION: ${{ steps.latest.outputs.collector }}
+          INSTRUMENTATION_VERSION: ${{ steps.update.outputs.instrumentation }}
+          SDK_VERSION: ${{ steps.update.outputs.sdk }}
+        run: |
+          title="chore(deps): bump OTel Lambda layers to python $PYTHON_VERSION / collector $COLLECTOR_VERSION"
+
+          user_id=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -a -m "$title"
+          git push --force origin "$BRANCH"
+
+          body_file=$(mktemp)
+          {
+            echo "OTel のコミュニティの Lambda レイヤーを上げます。"
+            echo
+            echo "| レイヤー | バージョン |"
+            echo "|---|---|"
+            echo "| Python 計装 | [layer-python/$PYTHON_VERSION](https://github.com/$UPSTREAM_REPO/releases/tag/layer-python/$PYTHON_VERSION) |"
+            echo "| Collector | [layer-collector/$COLLECTOR_VERSION](https://github.com/$UPSTREAM_REPO/releases/tag/layer-collector/$COLLECTOR_VERSION) |"
+            echo
+            echo "pyproject.toml の OTel の依存は、Python 計装レイヤーに合わせて SDK \`$SDK_VERSION\` / instrumentation \`$INSTRUMENTATION_VERSION\` に固定しました。"
+            echo
+            echo "マージする前に、上の 2 つのリリースノートで破壊的な変更が無いか確認してください。"
+            echo
+            echo "---"
+            echo "「$GITHUB_WORKFLOW」のワークフローで作りました: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$body_file"
+
+          url=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [[ -n "$url" ]]; then
+            gh pr edit "$url" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$body_file"
+            echo "Updated $url"
+          else
+            url=$(gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base "$BASE" \
+              --head "$BRANCH" \
+              --title "$title" \
+              --body-file "$body_file" \
+              --assignee "$GITHUB_REPOSITORY_OWNER")
+            echo "Created $url"
+          fi
+          echo "### OTel Lambda レイヤーの PR: $url" >> "$GITHUB_STEP_SUMMARY"
