@@ -353,7 +353,7 @@ jobs:
 
 - 最新のバージョンは `layer-python/*`・`layer-collector/*` のタグで決める。どちらも今の ARN と同じなら、何もしない。
 - `terraform-files` の中のレイヤーの ARN（`…:layer:opentelemetry-python-0_22_0:1` など）を書き換える。リージョン・アカウント・Collector のアーキテクチャは今の ARN のものを使い、ARN の最後のレイヤーのバージョンはリリースノートに載っている ARN から取る。
-- `pyproject.toml` の `opentelemetry-*` の依存を、Python 計装レイヤーのタグの `requirements.txt`・`nodeps-requirements.txt` のバージョンに `==` で固定し、`uv lock` する。ローカルと本番のバージョンをそろえるため。レイヤーに無い `opentelemetry-instrumentation-*`（アプリが自分のレイヤーで足す urllib など）は、`opentelemetry-instrumentation` と同じバージョンにする。
+- `pyproject.toml` の `opentelemetry-*` の依存を、Python 計装レイヤーのタグの `requirements.txt`・`nodeps-requirements.txt` のバージョンに `==` で固定し、`uv lock` する。ローカルと本番のバージョンをそろえるため。`[project] dependencies` と `[dependency-groups]`（dev など）の両方を見る。レイヤーに無い `opentelemetry-instrumentation-*`（アプリが自分のレイヤーで足す urllib など）は、`opentelemetry-instrumentation` と同じバージョンにする。`opentelemetry-api` は `requirements.txt` に無いので、`opentelemetry-sdk` と同じバージョンにする。
   - 呼び出し元では、Dependabot の `uv` で `opentelemetry-*` を `ignore` にしておく（このワークフロー以外で上がらないようにする）。
   - `uv lock` に使う uv のバージョンは、呼び出し元の `pyproject.toml`（または `uv.toml`）の `[tool.uv] required-version` で決まる（setup-uv が読む。無ければ最新）。uv のバージョンが変わると `uv.lock` の書き方（`revision`）が変わることがあるので、呼び出し元で `required-version` を書いておく。
 - PR は `update-otel-lambda-layers` のブランチから作る。すでに開いていれば、push し直して更新する。PR の作成は GitHub App のトークンで行う（`GITHUB_TOKEN` で作った PR では CI が起動しないため）。どの App を使うかは呼び出し元が決めて、シークレットの `PR_APP_CLIENT_ID`・`PR_APP_PRIVATE_KEY` で渡す。App に要る権限は Contents と Pull requests の write だけで、ruleset の対象外にする必要はない。依存の更新の PR を作るための App を用意し、使うリポジトリにだけインストールする。

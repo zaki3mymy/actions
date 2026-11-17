@@ -9,8 +9,10 @@ name: Update OTel Lambda layers
 #   レイヤーのバージョン（ARN の最後の :N）はリリースノートに載っている ARN から取る
 # - Python 計装レイヤーのタグの requirements.txt・nodeps-requirements.txt にあるバージョンに合わせて、
 #   pyproject.toml の opentelemetry-* の依存を == で固定し、uv lock する（ローカルと本番のバージョンをそろえる）。
+#   [project] dependencies と [dependency-groups] の両方を見る。
 #   レイヤーに無い opentelemetry-instrumentation-*（urllib など、アプリが自分のレイヤーで足すもの）は、
-#   opentelemetry-instrumentation と同じバージョンにする（python-contrib のパッケージはバージョンが同じ）
+#   opentelemetry-instrumentation と同じバージョンにする（python-contrib のパッケージはバージョンが同じ）。
+#   opentelemetry-api は opentelemetry-sdk と同じバージョンにする
 # - すでに最新なら何もしない。PR がすでに開いていれば、同じブランチに push し直して更新する
 # - PR の作成は GitHub App のトークンで行う（シークレットの PR_APP_CLIENT_ID・PR_APP_PRIVATE_KEY。
 #   GITHUB_TOKEN で作った PR では CI が起動しないため）。どの App を使うかは呼び出し元が決める。
@@ -185,7 +187,12 @@ jobs:
           project = Path(os.environ["PYTHON_PROJECT"])
           pyproject = project / "pyproject.toml"
           text = pyproject.read_text()
-          deps = tomllib.loads(text)["project"]["dependencies"]
+          data = tomllib.loads(text)
+          # 本番の依存と、dependency-groups（dev など。ローカルのテストで SDK を使うときなど）の両方を見る
+          deps = list(data.get("project", {}).get("dependencies", []))
+          for group in data.get("dependency-groups", {}).values():
+              # {include-group = "..."} のような文字列でない項目は飛ばす
+              deps += [d for d in group if isinstance(d, str)]
           new_text = text
           for dep in deps:
               name = re.match(r"[A-Za-z0-9_.-]+", dep)[0].lower().replace("_", "-")
@@ -193,6 +200,10 @@ jobs:
                   continue
               if name in pins:
                   ver = pins[name]
+              elif name == "opentelemetry-api":
+                  # requirements.txt には無い（opentelemetry-sdk の依存として入る）。
+                  # opentelemetry-api と opentelemetry-sdk はバージョンが同じ
+                  ver = pins["opentelemetry-sdk"]
               elif name.startswith("opentelemetry-instrumentation-"):
                   ver = pins["opentelemetry-instrumentation"]
               else:
