@@ -66,7 +66,12 @@ jobs:
           ref: ${{ inputs.base }}
           token: ${{ steps.app-token.outputs.token }}
 
+      # uv のバージョンは、呼び出し元の pyproject.toml（または uv.toml）の [tool.uv] required-version で決める
+      # （無ければ最新）。uv のバージョンが変わると uv.lock の書き方（revision）が変わることがあるため、
+      # 呼び出し元の CI やローカルと同じバージョンで uv lock する
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          working-directory: ${{ inputs.python-project }}
 
       - name: Find the latest layer versions
         id: latest
