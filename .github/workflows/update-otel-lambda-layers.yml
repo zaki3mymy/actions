@@ -135,14 +135,23 @@ jobs:
                   tag, ver = f"layer-collector/{collector_version}", collector_version
               if tag not in bodies:
                   bodies[tag] = release_body(tag)
-              layer = f"opentelemetry-{kind}-{ver.replace('.', '_')}"
+              ver_ = ver.replace(".", "_")
+              # リリースノートの ARN は、リージョンとアーキテクチャがプレースホルダーになっている。
+              #   arn:aws:lambda:<region>:184161586896:layer:opentelemetry-python-0_22_0:1
+              #   arn:aws:lambda:<region>:184161586896:layer:opentelemetry-collector-<amd64|arm64>-0_24_0:1
+              # そのため、レイヤーのバージョン（最後の :N）だけをリリースノートから取り、
+              # リージョン・アカウント・アーキテクチャは今の ARN のものを使う
+              name_re = "python" if kind == "python" else r"collector-(?:<[^>]+>|amd64|arm64)"
               found = re.search(
-                  rf"arn:aws:lambda:{re.escape(m['region'])}:{m['account']}:layer:{re.escape(layer)}:\d+",
+                  rf"arn:aws:lambda:[^:\s]+:{m['account']}:layer:opentelemetry-{name_re}-{ver_}:(\d+)",
                   bodies[tag],
               )
               if not found:
-                  raise SystemExit(f"{tag} のリリースノートに {m['region']} の {layer} の ARN がありません")
-              return found[0]
+                  raise SystemExit(f"{tag} のリリースノートに opentelemetry-{kind}-{ver_} の ARN がありません")
+              return (
+                  f"arn:aws:lambda:{m['region']}:{m['account']}:layer:"
+                  f"opentelemetry-{kind}-{ver_}:{found[1]}"
+              )
 
           changed = []
           for path in tf_files:
