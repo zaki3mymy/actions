@@ -11,6 +11,9 @@ name: Update OTel Lambda layers
 #   pyproject.toml の opentelemetry-* の依存を == で固定し、uv lock する（ローカルと本番のバージョンをそろえる）。
 #   レイヤーに無い opentelemetry-instrumentation-*（urllib など、アプリが自分のレイヤーで足すもの）は、
 #   opentelemetry-instrumentation と同じバージョンにする（python-contrib のパッケージはバージョンが同じ）
+# - Python 計装レイヤーの .pyc の Python のバージョンと、呼び出し元の Lambda のランタイム（Terraform の
+#   runtime = "python3.x"）を比べ、違えば警告を出す（PR の本文の先頭と、ワークフローの警告）。
+#   .pyc はそれを作った Python でしか使えず、違うランタイムではコールドスタートのたびにコンパイルし直すので遅くなる
 # - すでに最新なら何もしない。PR がすでに開いていれば、同じブランチに push し直して更新する
 # - PR の作成は GitHub App のトークンで行う（シークレットの PR_APP_CLIENT_ID・PR_APP_PRIVATE_KEY。
 #   GITHUB_TOKEN で作った PR では CI が起動しないため）。どの App を使うかは呼び出し元が決める。
@@ -219,6 +222,47 @@ jobs:
             git diff --stat
           fi
 
+      # レイヤーの .pyc の Python のバージョンと、Lambda のランタイムを比べる。
+      # .pyc はそれを作った Python でしか使えず、/opt は書き込めないので、違うランタイムでは
+      # コールドスタートのたびにレイヤーのモジュールをすべてコンパイルし直して遅くなる（エラーにはならない）。
+      # レイヤーを作る Python は、タグの python/src/otel/Dockerfile のビルド用のイメージで決まるが、
+      # 配られている zip の中身で確かめる。PR を作らない（すでに最新の）ときも、ずれていれば警告を出す
+      - name: Check the Python version of the layer
+        id: python-check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHON_VERSION: ${{ steps.latest.outputs.python }}
+        run: |
+          dir="$RUNNER_TEMP/otel-python-layer"
+          mkdir -p "$dir"
+          gh release download "layer-python/$PYTHON_VERSION" --repo "$UPSTREAM_REPO" \
+            --pattern opentelemetry-python-layer.zip --dir "$dir" --clobber
+          # .pyc のファイル名の cpython-314 などから、Python のバージョン（3.14 など）を取る
+          layer=$(unzip -Z1 "$dir/opentelemetry-python-layer.zip" \
+            | { grep -oE '\.cpython-3[0-9]+\.pyc$' || true; } \
+            | sed -E 's/^\.cpython-3([0-9]+)\.pyc$/3.\1/' | sort -u | paste -sd ' ' -)
+          # 呼び出し元の Terraform の Lambda のランタイム（runtime = "python3.14" など）
+          # （grep は見つからないと 1 を返し、xargs が 123 で終わるので || true で止めない）
+          runtimes=$({ git ls-files -z '*.tf' \
+            | xargs -0 -r grep -hoE '\bruntime[[:space:]]*=[[:space:]]*"python3\.[0-9]+"' || true; } \
+            | sed -E 's/.*"python(3\.[0-9]+)"/\1/' | sort -u | paste -sd ' ' -)
+          echo "レイヤー（layer-python/$PYTHON_VERSION）の .pyc: ${layer:-なし} / Lambda のランタイム: ${runtimes:-なし}"
+
+          warning=""
+          if [[ -z "$runtimes" ]]; then
+            echo "Terraform に Python のランタイムが見つからないので、比べない"
+          elif [[ -z "$layer" ]]; then
+            warning="レイヤー（layer-python/$PYTHON_VERSION）に .pyc が見つかりません。Lambda（python$runtimes）では、コールドスタートのたびにレイヤーのモジュールをコンパイルし直します。"
+          elif [[ "$layer" != "$runtimes" ]]; then
+            warning="レイヤー（layer-python/$PYTHON_VERSION）の .pyc は Python $layer 用ですが、Lambda のランタイムは Python $runtimes です。.pyc が使われず、コールドスタートのたびにレイヤーのモジュールをコンパイルし直すので遅くなります。ランタイムを Python $layer に上げることを検討してください（.python-version・requires-python・Containerfile・AWS provider が python$layer を知っているかも確認する）。"
+          fi
+          if [[ -n "$warning" ]]; then
+            echo "::warning::$warning"
+            echo "### ⚠️ OTel の Python 計装レイヤーと Lambda のランタイムの Python が違います" >> "$GITHUB_STEP_SUMMARY"
+            echo "$warning" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "warning=$warning" >> "$GITHUB_OUTPUT"
+
       - name: Create or update the PR
         if: steps.update.outputs.changed == 'true'
         env:
@@ -229,6 +273,7 @@ jobs:
           COLLECTOR_VERSION: ${{ steps.latest.outputs.collector }}
           INSTRUMENTATION_VERSION: ${{ steps.update.outputs.instrumentation }}
           SDK_VERSION: ${{ steps.update.outputs.sdk }}
+          PYTHON_WARNING: ${{ steps.python-check.outputs.warning }}
         run: |
           title="chore(deps): bump OTel Lambda layers to python $PYTHON_VERSION / collector $COLLECTOR_VERSION"
 
@@ -241,6 +286,11 @@ jobs:
 
           body_file=$(mktemp)
           {
+            if [[ -n "$PYTHON_WARNING" ]]; then
+              echo "> [!WARNING]"
+              echo "> $PYTHON_WARNING"
+              echo
+            fi
             echo "OTel のコミュニティの Lambda レイヤーを上げます。"
             echo
             echo "| レイヤー | バージョン |"
