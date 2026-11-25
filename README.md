@@ -273,6 +273,7 @@ jobs:
 - `pyproject.toml` の `opentelemetry-*` の依存を、Python 計装レイヤーのタグの `requirements.txt`・`nodeps-requirements.txt` のバージョンに `==` で固定し、`uv lock` する。ローカルと本番のバージョンをそろえるため。レイヤーに無い `opentelemetry-instrumentation-*`（アプリが自分のレイヤーで足す urllib など）は、`opentelemetry-instrumentation` と同じバージョンにする。
   - 呼び出し元では、Dependabot の `uv` で `opentelemetry-*` を `ignore` にしておく（このワークフロー以外で上がらないようにする）。
   - `uv lock` に使う uv のバージョンは、呼び出し元の `pyproject.toml`（または `uv.toml`）の `[tool.uv] required-version` で決まる（setup-uv が読む。無ければ最新）。uv のバージョンが変わると `uv.lock` の書き方（`revision`）が変わることがあるので、呼び出し元で `required-version` を書いておく。
+- Python 計装レイヤー（タグのリリースの `opentelemetry-python-layer.zip`）の `.pyc` の Python のバージョンと、呼び出し元の Terraform の Lambda のランタイム（`runtime = "python3.x"`）を比べ、違えば警告を出す（PR の本文の先頭と、ワークフローの警告・サマリー）。`.pyc` はそれを作った Python でしか使えず、`/opt` は書き込めないので、違うランタイムではコールドスタートのたびにレイヤーのモジュールをコンパイルし直して遅くなる（エラーにはならないので気づきにくい）。ランタイムは自動では上げない（`.python-version`・`requires-python`・Containerfile・AWS provider など、合わせて確かめることが多いため）。PR を作らない（すでに最新の）ときも、ずれていれば警告を出す。
 - PR は `update-otel-lambda-layers` のブランチから作る。すでに開いていれば、push し直して更新する。PR の作成は GitHub App のトークンで行う（`GITHUB_TOKEN` で作った PR では CI が起動しないため）。どの App を使うかは呼び出し元が決めて、シークレットの `PR_APP_CLIENT_ID`・`PR_APP_PRIVATE_KEY` で渡す。App に要る権限は Contents と Pull requests の write だけで、ruleset の対象外にする必要はない。依存の更新の PR を作るための App を用意し、使うリポジトリにだけインストールする。
 
 opentelemetry-lambda のリリースは、[feed-release-invoke-workflow](https://github.com/zaki3mymy/feed-release-invoke-workflow) の `repository_dispatch` で知る想定。どの言語のレイヤーのリリースでも起動されるが、このワークフローで最新のタグを見るので問題ない。取りこぼしに備えて、`schedule` でも定期的に動かす。
