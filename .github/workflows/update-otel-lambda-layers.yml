@@ -226,7 +226,14 @@ jobs:
       # .pyc はそれを作った Python でしか使えず、/opt は書き込めないので、違うランタイムでは
       # コールドスタートのたびにレイヤーのモジュールをすべてコンパイルし直して遅くなる（エラーにはならない）。
       # レイヤーを作る Python は、タグの python/src/otel/Dockerfile のビルド用のイメージで決まるが、
-      # 配られている zip の中身で確かめる。PR を作らない（すでに最新の）ときも、ずれていれば警告を出す
+      # Dockerfile ではなく、配られている zip の中身（.pyc のファイル名）で確かめる。理由:
+      #   - Lambda に載るのは zip なので、確実にずれに気づける（リリースの zip がその Dockerfile で
+      #     作られたとは限らない）
+      #   - .pyc が入っていないとき（--no-compile など）も、Python のバージョンが合っていても遅くなるが、
+      #     Dockerfile の FROM だけでは気づけない
+      #   - FROM の書き方（イメージ名・ARG など）が変わっても読める
+      # そのかわり、毎回 zip（約 5MB）をダウンロードする（週 1 回の定期実行とリリースのときだけ）。
+      # PR を作らない（すでに最新の）ときも、ずれていれば警告を出す
       - name: Check the Python version of the layer
         id: python-check
         env:
